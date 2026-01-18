@@ -1,0 +1,11 @@
+{
+  "cagr": 0.15,
+  "sharpe": 1.8,
+  "mdd": -0.2,
+  "date": "2026-01-17",
+  "params": {
+    "n_states": 3,
+    "min_len": 10,
+    "stickiness": 8.0
+  }
+}

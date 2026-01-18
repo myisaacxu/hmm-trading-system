@@ -1,0 +1,43 @@
+[flake8]
+# 设置最大行长度
+max-line-length = 120
+
+# 忽略的错误类型
+ignore = E501, W503, F401, W504
+
+# 忽略的目录
+exclude = 
+    __pycache__,
+    .pytest_cache,
+    cache,
+    logs,
+    models,
+    auto_examples_python,
+    tests
+
+# 排除的文件
+filename = *.py
+
+# 启用的扩展
+extend-ignore = 
+    E203,
+    E266,
+    E731,
+    C901,
+    W291,
+    W293
+
+# 每行允许的最大注释字符数
+max-doc-length = 80
+
+# 报告的格式
+format = %(path)s:%(row)d:%(col)d: %(code)s %(text)s
+
+# 统计信息
+count = True
+
+# 显示源文件
+source = True
+
+# 显示统计信息
+show-source = True
