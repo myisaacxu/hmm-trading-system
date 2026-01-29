@@ -310,6 +310,103 @@ class HMMRegimeDetector:
 
         return True
 
+    def optimize_parameters(
+        self, X: np.ndarray, param_grid: Dict, n_splits: int = 5
+    ) -> Dict:
+        """使用网格搜索优化参数
+
+        Args:
+            X: 特征矩阵
+            param_grid: 参数网格
+            n_splits: 交叉验证折数
+
+        Returns:
+            优化结果
+        """
+        from src.models.hmm_optimizer import HMMOptimizer
+
+        optimizer = HMMOptimizer()
+        return optimizer.optimize_parameters(X, param_grid, n_splits)
+
+    def optimize_with_bayesian(
+        self,
+        X: np.ndarray,
+        n_calls: int = 50,
+        n_splits: int = 3,
+        cache_dir: Optional[str] = None,
+    ) -> Dict:
+        """使用贝叶斯优化优化参数
+
+        Args:
+            X: 特征矩阵
+            n_calls: 优化迭代次数
+            n_splits: 交叉验证折数
+            cache_dir: 缓存目录
+
+        Returns:
+            优化结果
+        """
+        from src.models.bayesian_optimizer import BayesianOptimizer
+
+        optimizer = BayesianOptimizer(cache_dir=cache_dir)
+        result = optimizer.optimize_hmm_parameters(X, n_calls, n_splits)
+
+        # 应用最佳参数
+        best_params = result.get("best_params", {})
+        if best_params:
+            # 更新模型参数
+            self._config.n_states = best_params.get("n_states", self._config.n_states)
+            self._config.covariance_type = best_params.get(
+                "covariance_type", self._config.covariance_type
+            )
+            self._config.n_iter = best_params.get("n_iter", self._config.n_iter)
+
+            # 重新初始化模型
+            self.model = hmm.GaussianHMM(
+                n_components=self._config.n_states,
+                covariance_type=self._config.covariance_type,
+                n_iter=self._config.n_iter,
+                tol=self.model.tol,
+                random_state=self.model.random_state,
+            )
+
+            # 重新训练模型
+            self.fit(X)
+
+        return result
+
+    def optimize_features(self, data: pd.DataFrame, feature_columns: List[str]) -> Dict:
+        """优化特征选择
+
+        Args:
+            data: 包含特征的数据框
+            feature_columns: 特征列名列表
+
+        Returns:
+            特征选择结果
+        """
+        from src.models.hmm_optimizer import HMMOptimizer
+
+        optimizer = HMMOptimizer()
+        return optimizer.optimize_features(data, feature_columns, self._config.n_states)
+
+    def evaluate_performance(
+        self, data: pd.DataFrame, benchmark_col: Optional[str] = None
+    ) -> Dict:
+        """评估模型性能
+
+        Args:
+            data: 包含收益率数据的数据框
+            benchmark_col: 基准收益率列名
+
+        Returns:
+            性能评估结果
+        """
+        from src.models.performance_evaluator import PerformanceEvaluator
+
+        evaluator = PerformanceEvaluator()
+        return evaluator.evaluate_model_performance(data, "strat_ret", benchmark_col)
+
 
 class MarketStateAnalyzer:
     """市场状态分析器，按照原有程序逻辑实现"""
@@ -440,3 +537,36 @@ class MarketStateAnalyzer:
         signals_data["strat_ret"] = signals_data["position"] * signals_data["log_ret"]
 
         return signals_data
+
+    def evaluate_strategy_performance(
+        self, signals: pd.DataFrame, benchmark_col: Optional[str] = None
+    ) -> Dict:
+        """
+        评估策略性能
+
+        Args:
+            signals: 包含交易信号的数据框
+            benchmark_col: 基准收益率列名
+
+        Returns:
+            性能评估结果
+        """
+        from src.models.performance_evaluator import PerformanceEvaluator
+
+        evaluator = PerformanceEvaluator()
+        return evaluator.evaluate_model_performance(signals, "strat_ret", benchmark_col)
+
+    def compare_strategies(self, strategies: Dict[str, pd.DataFrame]) -> Dict:
+        """
+        比较多个策略的性能
+
+        Args:
+            strategies: 策略数据字典，键为策略名称，值为包含交易信号的数据框
+
+        Returns:
+            策略比较结果
+        """
+        from src.models.performance_evaluator import PerformanceEvaluator
+
+        evaluator = PerformanceEvaluator()
+        return evaluator.compare_models(strategies, "strat_ret")

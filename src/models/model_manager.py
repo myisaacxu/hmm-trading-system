@@ -47,7 +47,8 @@ class ModelManager:
 
         # 自动生成模型名称
         if model_name is None:
-            model_name = f"hmm_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # 使用微秒级时间戳确保唯一性
+            model_name = f"hmm_model_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
         # 清理模型名称
         model_name = model_name.strip()
@@ -218,12 +219,15 @@ class ModelManager:
         best_sharpe = best_model["sharpe"]
         improvement = current_sharpe - best_sharpe
 
+        # 直接计算should_save，不使用额外的bool转换
+        should_save = improvement > threshold
+
         return {
-            "has_better_model": current_sharpe > best_sharpe + threshold,
+            "has_better_model": current_sharpe > best_sharpe,
             "best_model_sharpe": best_sharpe,
             "current_sharpe": current_sharpe,
             "improvement": improvement,
-            "should_save": improvement > threshold,
+            "should_save": should_save,
         }
 
     def get_model_info(self, model_name: str) -> Optional[Dict]:

@@ -118,5 +118,8 @@ logs/
 # Cache
 cache/
 
+# Models
+models/
+
 # Examples
 auto_examples_python/

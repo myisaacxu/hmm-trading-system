@@ -154,7 +154,7 @@ class MarketStateAnalyzer:
                 duration_ratio=duration_ratio,
                 average_return=average_return,
                 volatility=volatility,
-                sample_count=len(state_data)
+                sample_count=len(state_data),
             )
 
         return analysis_results
@@ -317,20 +317,28 @@ class MarketStateAnalyzer:
 
         current_state = regime_series.iloc[0]
         start_index = 0
-        
+
         # 记录初始状态
-        initial_date = regime_series.index[0] if isinstance(regime_series.index, pd.DatetimeIndex) else None
+        initial_date = (
+            regime_series.index[0]
+            if isinstance(regime_series.index, pd.DatetimeIndex)
+            else None
+        )
         if initial_date:
             global_logger.log_market_state(
                 timestamp=initial_date,
                 state=self.state_names.get(current_state, f"状态{current_state}"),
                 state_id=current_state,
-                event="initial_state"
+                event="initial_state",
             )
 
         for i in range(1, len(regime_series)):
             next_state = regime_series.iloc[i]
-            transition_date = regime_series.index[i] if isinstance(regime_series.index, pd.DatetimeIndex) else None
+            transition_date = (
+                regime_series.index[i]
+                if isinstance(regime_series.index, pd.DatetimeIndex)
+                else None
+            )
 
             if next_state != current_state:
                 # 记录状态转换
@@ -348,7 +356,7 @@ class MarketStateAnalyzer:
                     ),
                 }
                 transitions.append(transition)
-                
+
                 # 记录状态转换日志
                 if transition_date:
                     global_logger.log_market_state(
@@ -358,7 +366,7 @@ class MarketStateAnalyzer:
                         from_state=current_state,
                         from_state_name=transition["from_state_name"],
                         event="state_transition",
-                        duration=i - start_index
+                        duration=i - start_index,
                     )
 
                 current_state = next_state

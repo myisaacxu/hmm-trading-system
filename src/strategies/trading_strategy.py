@@ -141,7 +141,7 @@ class TradingStrategy:
 
             signals.append(signal)
             positions.append(position)
-            
+
             # 记录交易信号
             global_logger.log_trading_signal(signal)
 
@@ -161,7 +161,7 @@ class TradingStrategy:
 
         # 计算策略表现
         performance = self.calculate_performance(aligned_data, positions)
-        
+
         # 记录策略表现
         global_logger.log_performance(performance)
 
@@ -238,15 +238,21 @@ class TradingStrategy:
 
         # 应用交易成本（仅在仓位变化时）
         position_changes = np.diff(positions) != 0
-        
+
         # 记录仓位变化和交易执行
-        for i, (change, date, prev_pos, curr_pos, price) in enumerate(zip(
-            position_changes,
-            price_returns.index,
-            positions[:-1],
-            positions[1:],
-            price_returns.index.map(lambda x: price_returns.name if hasattr(price_returns, 'name') else x)
-        )):
+        for i, (change, date, prev_pos, curr_pos, price) in enumerate(
+            zip(
+                position_changes,
+                price_returns.index,
+                positions[:-1],
+                positions[1:],
+                price_returns.index.map(
+                    lambda x: (
+                        price_returns.name if hasattr(price_returns, "name") else x
+                    )
+                ),
+            )
+        ):
             if change:
                 # 确定交易动作
                 if prev_pos == 0 and curr_pos > 0:
@@ -263,7 +269,7 @@ class TradingStrategy:
                     action = "SELL_SHORT"
                 else:
                     action = "HOLD"
-                
+
                 # 记录交易执行
                 global_logger.log_trade_execution(
                     date=pd.Timestamp(date),
@@ -271,9 +277,9 @@ class TradingStrategy:
                     price=price,
                     quantity=abs(curr_pos - prev_pos),
                     previous_position=prev_pos,
-                    new_position=curr_pos
+                    new_position=curr_pos,
                 )
-        
+
         # 应用交易成本
         strategy_returns.iloc[position_changes] -= self.transaction_cost
 

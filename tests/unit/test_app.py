@@ -1,210 +1,284 @@
+#!/usr/bin/env python3
 """
-项目启动程序单元测试
+app.py 单元测试
 """
 
-import pytest
-import sys
-import os
-from unittest.mock import Mock, patch, MagicMock
+import unittest
+from unittest.mock import patch, MagicMock
+import pandas as pd
+import numpy as np
+from datetime import datetime
 
-# 添加src目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-
-
-def test_app_exists():
-    """测试app.py文件存在"""
-    app_path = os.path.join(os.path.dirname(__file__), "../../app.py")
-    assert os.path.exists(app_path)
-
-
-def test_app_import():
-    """测试app.py可以正确导入"""
-    try:
-        # 这里会实际导入app模块，但会在测试中模拟
-        import app
-
-        assert hasattr(app, "main")
-    except ImportError:
-        pytest.fail("无法导入app模块")
+# 导入要测试的函数
+from app import (
+    check_dependencies,
+    setup_environment,
+    get_ebs_data,
+    get_buffett_index,
+    _calculate_buffett_index_fallback,
+    get_cebbank_data,
+    calculate_technical_indicators,
+)
 
 
-def test_app_has_main_function():
-    """测试app.py包含main函数"""
-    with open(
-        os.path.join(os.path.dirname(__file__), "../../app.py"), "r", encoding="utf-8"
-    ) as f:
-        content = f.read()
-        assert "def main():" in content
+class TestAppFunctions(unittest.TestCase):
+    """测试app.py中的函数"""
 
+    def test_check_dependencies(self):
+        """测试检查依赖包函数"""
+        # 测试所有依赖包都已安装的情况
+        missing_packages = check_dependencies()
+        # 由于我们在测试环境中运行，所有依赖包应该都已安装
+        # 但为了测试的健壮性，我们只检查返回值是否为列表
+        self.assertIsInstance(missing_packages, list)
 
-def test_app_imports_required_modules():
-    """测试app.py导入必要的模块"""
-    with open(
-        os.path.join(os.path.dirname(__file__), "../../app.py"), "r", encoding="utf-8"
-    ) as f:
-        content = f.read()
-        # 检查必要的导入
-        assert "import streamlit as st" in content
-        assert "import pandas as pd" in content
-        assert "import numpy as np" in content
+    @patch("app.st")
+    def test_get_ebs_data_success(self, mock_st):
+        """测试成功获取股债利差数据"""
+        with patch("app.ak.stock_ebs_lg") as mock_stock_ebs_lg:
+            # 模拟返回非空数据
+            mock_df = pd.DataFrame(
+                {"日期": ["2023-01-01", "2023-01-02"], "股债利差": [0.5, 0.6]}
+            )
+            mock_stock_ebs_lg.return_value = mock_df
 
+            result = get_ebs_data()
 
-def test_app_sets_page_config():
-    """测试app.py设置Streamlit页面配置"""
-    with open(
-        os.path.join(os.path.dirname(__file__), "../../app.py"), "r", encoding="utf-8"
-    ) as f:
-        content = f.read()
-        # 检查页面配置
-        assert "st.set_page_config" in content
+            # 检查返回值类型
+            self.assertIsInstance(result, pd.Series)
+            self.assertEqual(len(result), 2)
 
+    @patch("app.st")
+    def test_get_ebs_data_empty(self, mock_st):
+        """测试获取股债利差数据为空的情况"""
+        with patch("app.ak.stock_ebs_lg") as mock_stock_ebs_lg:
+            # 模拟返回空数据
+            mock_stock_ebs_lg.return_value = pd.DataFrame()
 
-class TestAppFunctionality:
-    """测试app.py功能"""
+            result = get_ebs_data()
 
-    def setup_method(self):
-        """测试初始化"""
-        # 模拟Streamlit组件
-        self.mock_st = Mock()
-        self.mock_st.set_page_config = Mock()
-        self.mock_st.sidebar = Mock()
-        self.mock_st.title = Mock()
-        self.mock_st.markdown = Mock()
+            # 检查返回值
+            self.assertIsNone(result)
+            mock_st.error.assert_called_once()
 
-    @patch("streamlit.set_page_config")
-    @patch("streamlit.title")
-    @patch("streamlit.markdown")
-    @patch("streamlit.sidebar")
-    @patch("streamlit.spinner")
-    @patch("streamlit.stop")
-    @patch("app.get_cebbank_data")
-    @patch("app.get_ebs_data")
-    @patch("app.get_buffett_index")
-    def test_main_function_creates_ui(
-        self,
-        mock_buffett,
-        mock_ebs,
-        mock_cebbank,
-        mock_stop,
-        mock_spinner,
-        mock_sidebar,
-        mock_markdown,
-        mock_title,
-        mock_set_page_config,
-    ):
-        """测试main函数创建UI界面"""
-        # 导入并执行main函数
-        import app
+    @patch("app.st")
+    def test_get_ebs_data_exception(self, mock_st):
+        """测试获取股债利差数据发生异常的情况"""
+        with patch("app.ak.stock_ebs_lg") as mock_stock_ebs_lg:
+            # 模拟发生异常
+            mock_stock_ebs_lg.side_effect = Exception("Test error")
 
-        # 模拟UI组件和数据获取
-        mock_sidebar.title = Mock()
-        mock_sidebar.selectbox = Mock(return_value="光大银行(601818)")
-        mock_sidebar.header = Mock()
-        mock_sidebar.markdown = Mock()
-        mock_sidebar.info = Mock()
+            result = get_ebs_data()
 
-        # 模拟datetime对象
-        mock_date = Mock()
-        mock_date.strftime = Mock(return_value="2020-01-01")
-        mock_sidebar.date_input = Mock(return_value=mock_date)
+            # 检查返回值
+            self.assertIsNone(result)
+            mock_st.error.assert_called_once()
 
-        mock_sidebar.slider = Mock(return_value=3)
-        mock_sidebar.checkbox = Mock(return_value=True)
-        mock_sidebar.button = Mock(return_value=False)  # 不点击开始分析按钮
+    @patch("app.st")
+    def test_get_buffett_index_success(self, mock_st):
+        """测试成功获取巴菲特指数数据"""
+        with patch("app.ak.stock_buffett_index_lg") as mock_stock_buffett_index_lg:
+            # 模拟返回非空数据
+            mock_df = pd.DataFrame(
+                {
+                    "日期": ["2023-01-01"],
+                    "总市值": [100000000000000],
+                    "GDP": [10000000000000],
+                }
+            )
+            mock_stock_buffett_index_lg.return_value = mock_df
 
-        # 模拟spinner上下文管理器
-        mock_spinner_context = Mock()
-        mock_spinner_context.__enter__ = Mock(return_value=None)
-        mock_spinner_context.__exit__ = Mock(return_value=None)
-        mock_spinner.return_value = mock_spinner_context
+            result = get_buffett_index()
 
-        # 模拟数据获取函数返回有效的测试数据
-        mock_stock_data = Mock()
-        mock_stock_data.empty = False
-        mock_stock_data.__getitem__ = Mock(return_value=Mock())  # 模拟索引访问
-        mock_stock_data.rename = Mock(return_value=mock_stock_data)
-        mock_stock_data.dropna = Mock(return_value=mock_stock_data)
-        mock_stock_data.sort_index = Mock(return_value=mock_stock_data)
+            # 检查返回值类型
+            self.assertIsInstance(result, pd.Series)
 
-        # 设置mock返回值
-        mock_cebbank.return_value = mock_stock_data
+    @patch("app.st")
+    def test_get_buffett_index_empty(self, mock_st):
+        """测试获取巴菲特指数数据为空的情况"""
+        with patch("app.ak.stock_buffett_index_lg") as mock_stock_buffett_index_lg:
+            # 模拟返回空数据
+            mock_stock_buffett_index_lg.return_value = pd.DataFrame()
 
-        # 模拟Series对象
-        mock_series = Mock()
-        mock_series.empty = False
-        mock_series.index = Mock()
-        mock_series.iloc = Mock()
-        mock_series.iloc.__getitem__ = Mock(return_value=10.0)
-        mock_series.__getitem__ = Mock(return_value=Mock())
-        mock_series.rename = Mock(return_value=mock_series)
-        mock_series.reindex = Mock(return_value=mock_series)
-        mock_series.fillna = Mock(return_value=mock_series)
+        with patch("app._calculate_buffett_index_fallback") as mock_fallback:
+            # 模拟备用方法返回值
+            mock_fallback.return_value = pd.Series(
+                [100], index=pd.date_range("2023-01-01", periods=1)
+            )
 
-        mock_ebs.return_value = mock_series
-        mock_buffett.return_value = mock_series
+            result = get_buffett_index()
 
-        # 执行main函数
-        try:
-            app.main()
+            # 检查返回值类型
+            self.assertIsInstance(result, pd.Series)
 
-            # 验证页面配置被调用
-            mock_set_page_config.assert_called_once()
+    @patch("app.st")
+    def test_get_buffett_index_exception(self, mock_st):
+        """测试获取巴菲特指数数据发生异常的情况"""
+        with patch("app.ak.stock_buffett_index_lg") as mock_stock_buffett_index_lg:
+            # 模拟发生异常
+            mock_stock_buffett_index_lg.side_effect = Exception("Test error")
 
-            # 验证标题被调用
-            mock_title.assert_called()
+        with patch("app._calculate_buffett_index_fallback") as mock_fallback:
+            # 模拟备用方法返回值
+            mock_fallback.return_value = pd.Series(
+                [100], index=pd.date_range("2023-01-01", periods=1)
+            )
 
-        except Exception as e:
-            # 允许一些导入错误，因为我们在测试环境中
-            if "ModuleNotFoundError" not in str(e) and "Mock" not in str(e):
-                raise
-            # 对于Mock相关的错误，可以忽略，因为这是测试环境
+            result = get_buffett_index()
 
-    def test_app_handles_data_fetching_errors(self):
-        """测试app.py处理数据获取错误"""
-        # 这个测试验证app.py有错误处理逻辑
-        with open(
-            os.path.join(os.path.dirname(__file__), "../../app.py"),
-            "r",
-            encoding="utf-8",
-        ) as f:
-            content = f.read()
-            # 检查错误处理
-            assert "try:" in content or "except" in content or "if" in content
+            # 检查返回值类型
+            self.assertIsInstance(result, pd.Series)
 
+    @patch("app.st")
+    @patch("app.bs")
+    def test_get_cebbank_data_success(self, mock_bs, mock_st):
+        """测试成功获取光大银行数据"""
+        # 模拟bs.login返回值
+        mock_bs.login.return_value = None
 
-def test_app_includes_all_features():
-    """测试app.py包含所有主要功能"""
-    with open(
-        os.path.join(os.path.dirname(__file__), "../../app.py"), "r", encoding="utf-8"
-    ) as f:
-        content = f.read()
-        # 检查主要功能模块
-        expected_features = [
-            "光大银行",  # 资产选择
-            "开始日期",  # 日期选择
-            "状态数量",  # HMM参数
-            "特征工程",  # 特征计算
-            "策略回测",  # 策略评估
-            "可视化",  # 图表展示
+        # 模拟查询结果
+        mock_rs = MagicMock()
+        mock_rs.error_code = "0"
+        mock_rs.fields = [
+            "date",
+            "code",
+            "open",
+            "high",
+            "low",
+            "close",
+            "preclose",
+            "volume",
+            "amount",
+            "turn",
+            "pctChg",
         ]
 
-        # 至少包含部分关键功能
-        assert any(feature in content for feature in expected_features)
+        # 模拟next方法和get_row_data方法
+        def mock_next():
+            """模拟查询结果的next方法
+            
+            Returns:
+                bool: 指示是否还有下一行数据
+            """
+            if not hasattr(mock_next, "called"):
+                mock_next.called = 0
+            mock_next.called += 1
+            return mock_next.called <= 2
 
+        mock_rs.next = mock_next
 
-def test_app_provides_installation_instructions():
-    """测试app.py提供安装说明"""
-    with open(
-        os.path.join(os.path.dirname(__file__), "../../app.py"), "r", encoding="utf-8"
-    ) as f:
-        content = f.read()
-        # 检查是否包含依赖检查或安装提示
-        assert (
-            "requirements" in content.lower()
-            or "install" in content.lower()
-            or "import" in content
-        )
+        def mock_get_row_data():
+            """模拟查询结果的get_row_data方法
+            
+            Returns:
+                list: 包含股票数据的列表
+            """
+            if mock_next.called == 1:
+                return [
+                    "2023-01-01",
+                    "sh.601818",
+                    "10.0",
+                    "10.5",
+                    "9.5",
+                    "10.2",
+                    "10.0",
+                    "1000000",
+                    "10200000",
+                    "1.0",
+                    "2.0",
+                ]
+            else:
+                return [
+                    "2023-01-02",
+                    "sh.601818",
+                    "10.2",
+                    "10.8",
+                    "10.0",
+                    "10.5",
+                    "10.2",
+                    "1200000",
+                    "12600000",
+                    "1.2",
+                    "2.9",
+                ]
+
+        mock_rs.get_row_data = mock_get_row_data
+
+        mock_bs.query_history_k_data_plus.return_value = mock_rs
+        mock_bs.logout.return_value = None
+
+        result = get_cebbank_data("2023-01-01", "2023-01-02")
+
+        # 检查返回值类型
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertEqual(len(result), 2)
+
+    @patch("app.st")
+    @patch("app.bs")
+    def test_get_cebbank_data_empty(self, mock_bs, mock_st):
+        """测试获取光大银行数据为空的情况"""
+        # 模拟bs.login返回值
+        mock_bs.login.return_value = None
+
+        # 模拟查询结果
+        mock_rs = MagicMock()
+        mock_rs.error_code = "0"
+        mock_rs.fields = [
+            "date",
+            "code",
+            "open",
+            "high",
+            "low",
+            "close",
+            "preclose",
+            "volume",
+            "amount",
+            "turn",
+            "pctChg",
+        ]
+
+        # 模拟next方法返回False
+        mock_rs.next.return_value = False
+        mock_rs.get_row_data.return_value = []
+
+        mock_bs.query_history_k_data_plus.return_value = mock_rs
+        mock_bs.logout.return_value = None
+
+        result = get_cebbank_data("2023-01-01", "2023-01-02")
+
+        # 检查返回值
+        self.assertIsNone(result)
+        mock_st.error.assert_called_once()
+
+    @patch("app.st")
+    @patch("app.bs")
+    def test_get_cebbank_data_exception(self, mock_bs, mock_st):
+        """测试获取光大银行数据发生异常的情况"""
+        # 模拟bs.login返回值
+        mock_bs.login.return_value = None
+
+        # 模拟查询发生异常
+        mock_bs.query_history_k_data_plus.side_effect = Exception("Test error")
+        mock_bs.logout.return_value = None
+
+        result = get_cebbank_data("2023-01-01", "2023-01-02")
+
+        # 检查返回值
+        self.assertIsNone(result)
+        mock_st.error.assert_called_once()
+
+    def test_calculate_technical_indicators(self):
+        """测试计算技术指标函数"""
+        # 创建测试数据
+        dates = pd.date_range("2023-01-01", periods=30)
+        prices = pd.Series(np.random.randn(30) + 10, index=dates)
+
+        result = calculate_technical_indicators(prices)
+
+        # 检查返回值类型
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertEqual(len(result), 30)
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    unittest.main()

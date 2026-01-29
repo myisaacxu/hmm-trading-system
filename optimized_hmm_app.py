@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-光大银行市场状态识别系统 - 项目启动程序
+光大银行市场状态识别系统 - 优化版
 
 基于隐马尔可夫模型(HMM)的银行股市场状态识别与交易策略应用。
 系统使用baostock获取光大银行历史数据，结合akshare获取的宏观数据，
-实现完整的市场状态识别与交易策略回测功能。
+实现完整的市场状态识别与交易策略回测功能，并添加参数优化和模型应用功能。
 
 使用方法:
-    streamlit run app.py
+    streamlit run optimized_hmm_app.py
 
 作者: AI Assistant
-版本: 1.0.0
+版本: 2.0.0
 """
 
 import os
@@ -50,6 +50,8 @@ try:
         from src.features.feature_engineer import FeatureEngineer
         from src.models.market_state_analyzer import MarketStateAnalyzer
         from src.models.model_manager import ModelManager
+        from src.models.hmm_optimizer import HMMOptimizer
+        from src.models.hmm_regime_detector import HMMRegimeDetector
 
         MODULE_IMPORT_SUCCESS = True
     except ImportError as e:
@@ -367,58 +369,6 @@ def create_feature_matrix(
     return X, Xz
 
 
-def train_hmm_model(
-    X: np.ndarray, n_states: int = 3, min_duration: int = 10, stickiness: float = 5.0
-) -> Dict:
-    """训练HMM模型"""
-    if len(X) == 0:
-        return {}
-
-    try:
-        # 训练高斯HMM模型
-        model = hmm.GaussianHMM(
-            n_components=n_states, covariance_type="full", n_iter=100, random_state=42
-        )
-
-        model.fit(X)
-
-        # 预测状态
-        labels = model.predict(X)
-
-        # 状态平滑
-        labels = enforce_min_duration(labels, min_duration)
-
-        return {"model": model, "labels": labels, "n_states": n_states}
-
-    except Exception as e:
-        st.error(f"HMM模型训练失败: {e}")
-        return {}
-
-
-def enforce_min_duration(labels: np.ndarray, min_len: int) -> np.ndarray:
-    """强制最小状态持续时间"""
-    if len(labels) == 0:
-        return labels
-
-    smoothed = labels.copy()
-
-    # 找出所有状态变化的点
-    change_points = np.where(np.diff(smoothed) != 0)[0] + 1
-    change_points = np.concatenate(([0], change_points, [len(smoothed)]))
-
-    # 合并短状态
-    for i in range(len(change_points) - 1):
-        start = change_points[i]
-        end = change_points[i + 1]
-        duration = end - start
-
-        if duration < min_len and i > 0:
-            # 短状态合并到前一个状态
-            smoothed[start:end] = smoothed[start - 1]
-
-    return smoothed
-
-
 def generate_trading_signals(
     price_data: pd.DataFrame, labels: np.ndarray, state_names: List[str] = None
 ) -> pd.DataFrame:
@@ -473,16 +423,27 @@ def calculate_performance_metrics(signals: pd.DataFrame) -> Dict:
         else 0
     )
 
+    # 最大回撤
+    bh_roll_max = bh_cum_ret.cummax()
+    bh_drawdown = (bh_cum_ret - bh_roll_max) / bh_roll_max
+    bh_mdd = bh_drawdown.min() if not bh_drawdown.empty else 0
+
+    strat_roll_max = strat_cum_ret.cummax()
+    strat_drawdown = (strat_cum_ret - strat_roll_max) / strat_roll_max
+    strat_mdd = strat_drawdown.min() if not strat_drawdown.empty else 0
+
     return {
         "buy_hold": {
             "cagr": bh_cagr,
             "sharpe": bh_sharpe,
             "final_return": bh_final_ret,
+            "mdd": bh_mdd,
         },
         "hmm_strategy": {
             "cagr": strat_cagr,
             "sharpe": strat_sharpe,
             "final_return": strat_final_ret,
+            "mdd": strat_mdd,
         },
     }
 
@@ -535,24 +496,26 @@ def create_price_chart(price_data: pd.DataFrame, labels: np.ndarray) -> go.Figur
 def main():
     """主函数"""
     # 记录应用启动
-    global_logger.info("光大银行市场状态识别系统启动")
+    global_logger.info("光大银行市场状态识别系统(优化版)启动")
 
     # 设置页面配置
     st.set_page_config(
-        page_title="光大银行市场状态识别",
+        page_title="光大银行市场状态识别 - 优化版",
         page_icon="🏦",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
     # 应用标题
-    st.title("🏦 光大银行市场状态识别系统")
-    st.markdown("基于隐马尔可夫模型(HMM)的银行股市场状态识别与交易策略")
+    st.title("🏦 光大银行市场状态识别系统 - 优化版")
+    st.markdown(
+        "基于隐马尔可夫模型(HMM)的银行股市场状态识别与交易策略，支持参数优化和模型应用"
+    )
 
     # 侧边栏配置参数
     st.sidebar.header("策略参数配置")
 
-    # asset = st.sidebar.selectbox("选择资产", ["光大银行(601818)"], index=0)
+    # 基本参数
     start_date = st.sidebar.date_input("开始日期", pd.to_datetime("2010-01-01"))
     n_states = st.sidebar.slider("状态数量", 2, 6, 3)
     min_len = st.sidebar.slider("最小状态持续时间", 5, 30, 15)
@@ -564,6 +527,26 @@ def main():
     vol_window = st.sidebar.slider("波动率计算窗口", 10, 60, 30)
     ma_short = st.sidebar.slider("短期均线窗口", 10, 50, 20)
     ma_long = st.sidebar.slider("长期均线窗口", 50, 200, 100)
+
+    # 参数优化配置
+    st.sidebar.markdown("---")
+    st.sidebar.header("参数优化配置")
+    enable_optimization = st.sidebar.checkbox("启用参数优化", value=False)
+
+    if enable_optimization:
+        optimization_method = st.sidebar.selectbox(
+            "优化方法", ["网格搜索", "特征选择", "平滑参数优化"]
+        )
+        n_splits = st.sidebar.slider("交叉验证折数", 2, 5, 3)
+
+    # 模型管理配置
+    st.sidebar.markdown("---")
+    st.sidebar.header("模型管理")
+    use_saved_model = st.sidebar.checkbox("使用保存的模型", value=False)
+
+    # 初始化模型管理器
+    model_manager = ModelManager()
+    optimizer = HMMOptimizer()
 
     end = None
 
@@ -692,112 +675,197 @@ def main():
         X_std = X.std(axis=0, keepdims=True) + 1e-12
         Xz = (X - X_mean) / X_std
 
-        # 核心逻辑 — HMM 类与平滑处理
-        class HMMRegimeDetector:
-            def __init__(
-                self,
-                n_states=4,
-                covariance_type="diag",
-                n_iter=300,
-                tol=1e-4,
-                random_state=None,
-            ):
-                self.model = hmm.GaussianHMM(
-                    n_components=n_states,
-                    covariance_type=covariance_type,
-                    n_iter=n_iter,
-                    tol=tol,
-                    random_state=random_state,
+        # 核心逻辑 — 使用导入的HMMRegimeDetector类
+
+        # 执行参数优化
+        best_params = {"n_states": n_states, "covariance_type": "diag", "n_iter": 100}
+
+        if enable_optimization:
+            st.subheader("参数优化结果")
+
+            if optimization_method == "网格搜索":
+                # 定义参数网格
+                param_grid = {
+                    "n_states": [2, 3, 4],
+                    "covariance_type": ["diag", "full"],
+                    "n_iter": [100, 200],
+                }
+
+                # 执行网格搜索
+                with st.spinner("正在执行网格搜索优化..."):
+                    optimization_result = optimizer.optimize_parameters(
+                        Xz, param_grid, n_splits=n_splits
+                    )
+
+                best_params = optimization_result["best_params"]
+                best_score = optimization_result["best_score"]
+
+                st.success(f"网格搜索优化完成！最佳参数: {best_params}")
+                st.info(f"最佳得分: {best_score:.4f}")
+
+                # 显示交叉验证结果
+                with st.expander("查看交叉验证结果"):
+                    cv_results = optimization_result["cv_results"]
+                    cv_df = pd.DataFrame(cv_results)
+                    st.dataframe(cv_df)
+
+            elif optimization_method == "特征选择":
+                # 定义特征列表
+                # 先计算log_ret并添加到df中
+                df_with_log_ret = df.copy()
+                df_with_log_ret["log_ret"] = (
+                    np.log(df_with_log_ret["PX"]).diff().fillna(0.0)
                 )
-                self.n_states = n_states
 
-            @staticmethod
-            def enforce_min_duration(labels, min_len=10):
-                """合并短状态运行（< min_len）到较长的相邻状态"""
-                s = np.array(labels, copy=True)
-                n = len(s)
-                i = 0
-                while i < n:
-                    j = i + 1
-                    while j < n and s[j] == s[i]:
-                        j += 1
-                    run_len = j - i
-                    if run_len < min_len:
-                        left = s[i - 1] if i > 0 else None
-                        right = s[j] if j < n else None
-                        if left is None and right is not None:
-                            s[i:j] = right
-                        elif right is None and left is not None:
-                            s[i:j] = left
-                        elif left is not None and right is not None:
-                            # 比较相邻运行的长度
-                            L = i - 1
-                            while L - 1 >= 0 and s[L - 1] == left:
-                                L -= 1
-                            left_len = i - L
-                            R = j
-                            while R + 1 < n and s[R + 1] == right:
-                                R += 1
-                            right_len = R - j + 1
-                            s[i:j] = left if left_len >= right_len else right
-                    i = j
-                return s
+                feature_columns = ["log_ret", "VOL", "SPREAD", "EBS", "BUFFETT"]
 
-            def fit(self, X):
-                """
-                训练HMM模型
+                # 执行特征选择
+                with st.spinner("正在执行特征选择..."):
+                    feature_result = optimizer.optimize_features(
+                        df_with_log_ret, feature_columns, n_states=n_states
+                    )
 
-                Args:
-                    X: 特征矩阵
+                best_features = feature_result["best_features"]
+                best_score = feature_result["best_score"]
+                feature_importance = feature_result["feature_importance"]
 
-                Returns:
-                    训练后的模型实例
-                """
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore")
-                    self.model.fit(X)
-                return self
+                st.success(f"特征选择完成！最佳特征组合: {best_features}")
+                st.info(f"最佳得分: {best_score:.4f}")
 
-            def make_sticky(self, strength=10.0):
-                """通过增强转移矩阵对角线使状态更倾向于保持不变"""
-                A = self.model.transmat_
-                A = A + strength * np.eye(self.n_states)
-                self.model.transmat_ = A / A.sum(axis=1, keepdims=True)
-                return self
+                # 显示特征重要性
+                with st.expander("查看特征重要性"):
+                    importance_df = pd.DataFrame(
+                        list(feature_importance.items()), columns=["特征", "重要性"]
+                    ).sort_values(by="重要性", ascending=False)
+                    st.dataframe(importance_df)
 
-            def predict(self, X, min_len=10, sticky_strength=None):
-                """预测市场状态
+                    # 可视化特征重要性
+                    fig = px.bar(
+                        importance_df, x="特征", y="重要性", title="特征重要性排序"
+                    )
+                    st.plotly_chart(fig)
 
-                Args:
-                    X: 输入特征矩阵
-                    min_len: 状态最小持续时间
-                    sticky_strength: 状态粘性强度
+                # 使用最佳特征重新创建特征矩阵
+                if best_features:
+                    # 重新计算最佳特征的特征矩阵
+                    feature_map = {
+                        "log_ret": np.log(df["PX"]).diff().fillna(0.0).values,
+                        "VOL": df["VOL"].values,
+                        "SPREAD": df["SPREAD"].values,
+                        "EBS": df["EBS"].values,
+                        "BUFFETT": df["BUFFETT"].values,
+                    }
 
-                Returns:
-                    states: 预测的状态序列
-                    proba: 状态概率矩阵
-                """
-                if sticky_strength is not None:
-                    self.make_sticky(sticky_strength)
-                states = self.model.predict(X)
-                states = self.enforce_min_duration(states, min_len=min_len)
-                proba = self.model.predict_proba(X)
-                return states, proba
+                    X_best = np.column_stack(
+                        [feature_map[feature] for feature in best_features]
+                    )
+                    X_best = np.nan_to_num(X_best, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # 执行和结果（训练、标记、绘图、简单回测）
-        # 在标准化特征上训练 HMM
-        global_logger.info(f"开始训练HMM模型，状态数量: {n_states}")
-        detector = HMMRegimeDetector(n_states=n_states).fit(Xz)
-        global_logger.info("HMM模型训练完成")
+                    # 标准化
+                    X_best_mean = X_best.mean(axis=0, keepdims=True)
+                    X_best_std = X_best.std(axis=0, keepdims=True) + 1e-12
+                    Xz = (X_best - X_best_mean) / X_best_std
 
-        # 使用粘性和最小持续时间平滑预测状态
-        global_logger.info(
-            f"开始预测市场状态，最小持续时间: {min_len}, 状态粘性: {stickiness}"
-        )
-        states, proba = detector.predict(
-            Xz, min_len=min_len, sticky_strength=stickiness
-        )
-        global_logger.info(f"市场状态预测完成，共识别 {len(np.unique(states))} 种状态")
+            elif optimization_method == "平滑参数优化":
+                # 执行平滑参数优化
+                with st.spinner("正在执行平滑参数优化..."):
+                    smoothing_result = optimizer.optimize_smoothing_parameters(
+                        Xz, n_states=n_states
+                    )
+
+                best_smoothing_params = smoothing_result["best_params"]
+                best_score = smoothing_result["best_score"]
+
+                st.success(f"平滑参数优化完成！最佳参数: {best_smoothing_params}")
+                st.info(f"最佳得分: {best_score:.4f}")
+
+                # 更新平滑参数
+                min_len = best_smoothing_params["min_duration"]
+                stickiness = best_smoothing_params["sticky_strength"]
+
+        # 训练模型或加载保存的模型
+        if use_saved_model:
+            # 列出保存的模型
+            saved_models = model_manager.list_saved_models()
+
+            if saved_models:
+                st.subheader("选择保存的模型")
+
+                # 创建模型选择下拉菜单
+                model_options = [
+                    f"{model['name']} (夏普: {model['sharpe']:.2f}, 年化: {model['cagr']:.2f})"
+                    for model in saved_models
+                ]
+                selected_model_idx = st.selectbox(
+                    "选择模型",
+                    range(len(model_options)),
+                    format_func=lambda x: model_options[x],
+                )
+
+                selected_model = saved_models[selected_model_idx]
+                model_name = selected_model["name"]
+
+                # 加载模型
+                with st.spinner(f"正在加载模型: {model_name}..."):
+                    loaded_model, loaded_metrics = model_manager.load_model(model_name)
+
+                if loaded_model is not None:
+                    st.success(f"模型加载成功！模型名称: {model_name}")
+                    if loaded_metrics:
+                        sharpe = loaded_metrics.get("sharpe", 0.0)
+                        cagr = loaded_metrics.get("cagr", 0.0)
+                        st.info(f"模型性能: 夏普比率={sharpe:.2f}, 年化收益={cagr:.2f}")
+
+                    # 使用加载的模型预测
+                    states, proba = loaded_model.predict(Xz)
+                else:
+                    st.error("模型加载失败，请选择其他模型")
+                    # 回退到默认模型
+                    detector = HMMRegimeDetector(
+                        n_states=best_params.get("n_states", 3),
+                        covariance_type=best_params.get("covariance_type", "diag"),
+                        n_iter=best_params.get("n_iter", 100),
+                    )
+                    detector.fit(Xz)
+                    states, proba = detector.predict(
+                        Xz, min_len=min_len, sticky_strength=stickiness
+                    )
+            else:
+                st.warning("没有找到保存的模型，使用默认参数训练新模型")
+                # 回退到默认模型
+                detector = HMMRegimeDetector(
+                    n_states=best_params.get("n_states", 3),
+                    covariance_type=best_params.get("covariance_type", "diag"),
+                    n_iter=best_params.get("n_iter", 100),
+                )
+                detector.fit(Xz)
+                states, proba = detector.predict(
+                    Xz, min_len=min_len, sticky_strength=stickiness
+                )
+        else:
+            # 执行和结果（训练、标记、绘图、简单回测）
+            # 在标准化特征上训练 HMM
+            global_logger.info(
+                f"开始训练HMM模型，状态数量: {best_params.get('n_states', 3)}"
+            )
+            detector = HMMRegimeDetector(
+                n_states=best_params.get("n_states", 3),
+                covariance_type=best_params.get("covariance_type", "diag"),
+                n_iter=best_params.get("n_iter", 100),
+            )
+            detector.fit(Xz)
+            global_logger.info("HMM模型训练完成")
+
+            # 使用粘性和最小持续时间平滑预测状态
+            global_logger.info(
+                f"开始预测市场状态，最小持续时间: {min_len}, 状态粘性: {stickiness}"
+            )
+            states, proba = detector.predict(
+                Xz, min_len=min_len, sticky_strength=stickiness
+            )
+            global_logger.info(
+                f"市场状态预测完成，共识别 {len(np.unique(states))} 种状态"
+            )
 
         # 组装输出数据框
         out = df.copy()
@@ -810,7 +878,7 @@ def main():
         )
         ranked = state_means.index.tolist()
         labels = {ranked[0]: "Bull", ranked[-1]: "Bear"}
-        for s in set(range(n_states)) - set(labels):
+        for s in set(range(best_params.get("n_states", 3))) - set(labels):
             labels[s] = "Neutral"
         out["regime"] = out["state"].map(labels)
 
@@ -1180,6 +1248,45 @@ def main():
             else:
                 st.info("没有检测到状态转换")
 
+        # 模型保存功能
+        st.subheader("模型管理")
+
+        # 生成性能指标
+        performance_metrics = {
+            "cagr": st_cagr,
+            "sharpe": st_sharp,
+            "mdd": st_mdd,
+            "params": {
+                **best_params,
+                "min_duration": min_len,
+                "sticky_strength": stickiness,
+            },
+        }
+
+        # 比较当前模型与已保存模型
+        comparison_result = model_manager.compare_models(performance_metrics)
+
+        if comparison_result["should_save"]:
+            st.success("当前模型性能优于已保存模型，建议保存！")
+        else:
+            st.info(f"当前模型夏普比率: {comparison_result['current_sharpe']:.2f}")
+            st.info(f"最佳模型夏普比率: {comparison_result['best_model_sharpe']:.2f}")
+            st.info(f"改进幅度: {comparison_result['improvement']:.2f}")
+
+        # 保存模型按钮
+        if st.button("保存当前模型"):
+            model_name = model_manager.save_model(detector, performance_metrics)
+            st.success(f"模型保存成功！模型名称: {model_name}")
+
+        # 显示已保存的模型
+        with st.expander("查看已保存的模型"):
+            saved_models = model_manager.list_saved_models()
+            if saved_models:
+                saved_models_df = pd.DataFrame(saved_models)
+                st.dataframe(saved_models_df)
+            else:
+                st.info("暂无保存的模型")
+
         # 显示原始数据
         if st.sidebar.checkbox("显示原始数据"):
             st.subheader("原始数据")
@@ -1194,11 +1301,13 @@ def main():
         - 牛市做多，熊市做空，中性观望
         - 基于光大银行股价、股债利差、巴菲特指数等多因子
         - 数据来源：baostock（股票数据）+ akshare（宏观数据）
+        - 支持参数优化、特征选择和平滑参数优化
+        - 支持模型保存、加载和比较
         """
         )
 
         # 记录应用运行完成
-        global_logger.info("光大银行市场状态识别系统运行完成")
+        global_logger.info("光大银行市场状态识别系统(优化版)运行完成")
 
 
 if __name__ == "__main__":
